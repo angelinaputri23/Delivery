@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Delivery Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
+<style>
+:root{--bg:#fff;--fg:#1f2430;--m:#6b7280;--card:#f6f7f9;--bd:#dfe3e8;--ac:#1a7f5a;--acf:#fff;color-scheme:light}
+@media(prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#16181d;--fg:#e8eaee;--m:#9aa1ac;--card:#1f232a;--bd:#323843;--ac:#3fbf8f;--acf:#08150f;color-scheme:dark}}
+:root[data-theme=dark]{--bg:#16181d;--fg:#e8eaee;--m:#9aa1ac;--card:#1f232a;--bd:#323843;--ac:#3fbf8f;--acf:#08150f;color-scheme:dark}
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:980px;margin:0 auto;padding:16px}
+h1{font-size:20px;margin:0 0 12px}
+nav{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
+button,input,select{font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:6px 10px;max-width:100%}
+button{cursor:pointer}button.p,nav button.on{background:var(--ac);color:var(--acf);border-color:var(--ac)}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:12px;margin-bottom:12px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:6px 0}
+.m{color:var(--m)}.sc{overflow-x:auto}
+table{border-collapse:collapse;width:100%}th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--bd);white-space:nowrap}
+.pill{padding:1px 10px;border-radius:99px;border:1px solid var(--bd);font-size:12px}
+.pill.Prepared{color:#b45309}.pill.Shipped{color:#2563eb}.pill.Delivered{color:var(--ac)}
+ul{margin:6px 0;padding-left:20px}h3{margin:18px 0 8px;font-size:15px}
+</style></head><body><main>
+<h1>📦 Delivery Dashboard</h1>
+<nav><button data-t="dash" onclick="go('dash')">Summary</button><button data-t="req" onclick="go('req')">Item requests</button><button data-t="ship" onclick="go('ship')">Shipments</button>
+<span id="st" class="m"></span><span style="flex:1"></span><button onclick="cfg()">⚙ Sheet</button><button onclick="pull()">↻</button><button onclick="bk()">⬇ Backup</button><button onclick="document.getElementById('imp').click()">⬆ Restore</button><input id="imp" type="file" accept=".json" hidden onchange="rs(this)"></nav>
+<div id="v"></div></main>
+<script>
+const BR={TN:['TN 台南科工一','No. 42, Keji 2nd Rd., Annan Dist., Tainan City 709033, Taiwan'],FN:['FN 湖內','No. 2, Changchun 4th St., Hunei Dist., Kaohsiung City 829'],MF:['MF 明湖','No. 33, Ln. 486, Minghu Rd., East Dist., Hsinchu City 300'],DW:['DW 德威','No. 3, Fuqun St., Xiangshan Dist., Hsinchu City 300'],DT:['DT 大學','No. 338, Daxue 7th St., Nanzi Dist., Kaohsiung City 811']};
+const CR=['HCT','Maple','Hemao'],STS=['Requested','Prepared','Shipped','Delivered'];
+let S={reqs:[],ships:[]},tab='dash',sel=new Set(),fb='',fs='';
+try{S=JSON.parse(localStorage.getItem('dlv')||'')||S}catch(e){}
+const save=()=>{try{localStorage.setItem('dlv',JSON.stringify(S))}catch(e){}};
+let CFG={url:'',key:''},Q=[],fl=null;
+try{CFG=JSON.parse(localStorage.getItem('dlvcfg')||'')||CFG}catch(e){}
+try{Q=JSON.parse(localStorage.getItem('dlvq')||'')||[]}catch(e){}
+const saveQ=()=>{try{localStorage.setItem('dlvq',JSON.stringify(Q))}catch(e){}};
+const setSt=t=>{const e=document.getElementById('st');if(e)e.textContent=t};
+const shipO=s=>({...s,items:S.reqs.filter(r=>r.shipId==s.id).map(r=>r.item+' ×'+r.qty+(r.note?' ('+r.note+')':'')).join('; ')});
+const putR=r=>({t:'put',sheet:'Requests',o:r}),putS=s=>({t:'put',sheet:'Shipments',o:shipO(s)});
+const allOps=()=>[...S.reqs.map(putR),...S.ships.map(putS)];
+function cfg(){const u=prompt('Google Apps Script Web app URL:',CFG.url);if(u===null)return;const k=prompt('Secret key (KEY in the script):',CFG.key);if(k===null)return;
+ CFG={url:u.trim(),key:k.trim()};try{localStorage.setItem('dlvcfg',JSON.stringify(CFG))}catch(e){}pull()}
+function sync(ops){save();if(!CFG.url)return;Q.push(...ops);saveQ();return flush()}
+function flush(){if(!CFG.url||!Q.length)return Promise.resolve(true);if(fl)return fl;const n=Q.length;setSt('Saving…');
+ fl=fetch(CFG.url,{method:'POST',body:JSON.stringify({key:CFG.key,ops:Q.slice(0,n)})}).then(r=>r.json()).then(j=>{if(j.error)throw j.error;Q.splice(0,n);saveQ();setSt('Synced');return true}).catch(e=>{setSt('⚠ Not saved yet: '+e);return false}).finally(()=>{fl=null});return fl}
+async function pull(auto){
+ if(!CFG.url){setSt('Local only · click ⚙ Sheet to connect');return}
+ if(!(await flush()))return;
+ try{const j=await(await fetch(CFG.url+'?key='+encodeURIComponent(CFG.key))).json();if(j.error)throw j.error;
+  const n={reqs:j.reqs,ships:j.ships};n.reqs.forEach(r=>{if(!r.shipId)delete r.shipId});
+  if(!n.reqs.length&&!n.ships.length&&(S.reqs.length||S.ships.length)){if(confirm('The Google Sheet is empty. Upload the data stored in this browser to it?')){sync(allOps());return}}
+  setSt('Synced '+new Date().toLocaleTimeString());
+  if(JSON.stringify(n)==JSON.stringify(S))return;
+  if(auto&&/INPUT|SELECT/.test((document.activeElement||{}).tagName||''))return;
+  S=n;save();render()}catch(e){setSt('⚠ Cannot reach the sheet: '+e)}}
+const $=s=>document.querySelector(s),uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,5);
+const today=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
+const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const bopt=v=>Object.keys(BR).map(k=>`<option value="${k}"${k==v?' selected':''}>${BR[k][0]}</option>`).join('');
+const shipOf=r=>S.ships.find(x=>x.id==r.shipId),st=r=>shipOf(r)?shipOf(r).status:'Requested',items=id=>S.reqs.filter(r=>r.shipId==id);
+function go(t){if(t!=tab){F.s='';F.c=''}tab=t;render()}
+function render(){document.querySelectorAll('nav button[data-t]').forEach(b=>b.classList.toggle('on',b.dataset.t==tab));$('#v').innerHTML=tab=='dash'?vDash():tab=='req'?vReq():vShip()}
+const MN=['January','February','March','April','May','June','July','August','September','October','November','December'];
+let F={y:'',m:'',b:'',s:'',c:'',q:''};
+const gk=d=>d.slice(0,4)+' · '+MN[+d.slice(5,7)-1];
+const yrs=l=>[...new Set(l.map(x=>x.date.slice(0,4)).concat(today().slice(0,4)))].sort().reverse();
+const dm=x=>(!F.y||x.date.slice(0,4)==F.y)&&(!F.m||x.date.slice(5,7)==F.m)&&(!F.b||x.branch==F.b);
+function fbar(list,sts,car){
+ const o=(a,v)=>a.map(x=>`<option${x==v?' selected':''}>${x}</option>`).join('');
+ const mo=MN.map((n,i)=>{const v=String(i+1).padStart(2,'0');return `<option value="${v}"${F.m==v?' selected':''}>${n}</option>`}).join('');
+ return `<div class="row"><select onchange="F.y=this.value;render()"><option value="">All years</option>${o(yrs(list),F.y)}</select>
+ <select onchange="F.m=this.value;render()"><option value="">All months</option>${mo}</select>
+ <select onchange="F.b=this.value;render()"><option value="">All branches</option>${bopt(F.b)}</select>
+ <select onchange="F.s=this.value;render()"><option value="">All statuses</option>${o(sts,F.s)}</select>
+ ${car?`<select onchange="F.c=this.value;render()"><option value="">All carriers</option>${o(CR,F.c)}</select>`:''}
+ <input type="search" placeholder="Search item, note, tracking code…" value="${esc(F.q)}" onchange="F.q=this.value.trim();render()">
+ <button onclick="F={y:'',m:'',b:'',s:'',c:'',q:''};render()">Reset</button></div>`}
+function vDash(){
+ const rq=S.reqs.filter(r=>!F.y||r.date.slice(0,4)==F.y);
+ const rows=Object.keys(BR).map(k=>{const rs=rq.filter(r=>r.branch==k);return `<tr><td>${BR[k][0]}</td>${STS.map(s=>`<td>${rs.filter(r=>st(r)==s).length}</td>`).join('')}</tr>`}).join('');
+ const tr=S.ships.filter(s=>s.status=='Shipped').map(s=>`<li><b>${BR[s.branch][0]}</b> · ${esc(s.carrier||'-')} · ${esc(s.code||'(no tracking code yet)')} · ${s.date}</li>`).join('')||'<li class="m">No packages in transit</li>';
+ const pr=S.ships.filter(s=>s.status=='Prepared').length;
+ return `<div class="row"><select onchange="F.y=this.value;render()"><option value="">All years</option>${yrs(S.reqs).map(y=>`<option${y==F.y?' selected':''}>${y}</option>`).join('')}</select></div>
+ <div class="card"><b>Items per branch, by status</b><div class="sc"><table><tr><th>Branch<th>Requested<th>Prepared<th>Shipped<th>Delivered</tr>${rows}</table></div></div>
+ <div class="card"><b>In transit (Shipped)</b><ul>${tr}</ul><div class="m">${pr} shipment(s) prepared but not shipped yet</div></div>`}
+function vReq(){
+ const q=F.q.toLowerCase(),rs=S.reqs.filter(r=>dm(r)&&(!F.s||st(r)==F.s)&&(!q||(r.item+' '+r.note).toLowerCase().includes(q))).sort((a,b)=>b.date.localeCompare(a.date));
+ let last='',body='';
+ rs.forEach(r=>{const k=gk(r.date);if(k!=last){last=k;body+=`<tr><td colspan="8"><b>${k}</b> <span class="m">(${rs.filter(x=>gk(x.date)==k).length})</span></td></tr>`}
+  body+=`<tr><td>${st(r)=='Requested'?`<input type="checkbox" ${sel.has(r.id)?'checked':''} onchange="tg('${r.id}')">`:''}<td>${r.date}<td>${r.branch}<td>${esc(r.item)}<td>${esc(r.qty)}<td>${esc(r.note)}<td><span class="pill ${st(r)}">${st(r)}</span><td><button onclick="del('${r.id}')">✕</button></tr>`});
+ return `<div class="card"><b>Add request</b><div class="row"><input type="date" id="nd" value="${today()}"><select id="nb">${bopt()}</select>
+ <input id="ni" placeholder="Item (e.g. Uniform)" list="il"><input id="nq" placeholder="Qty" size="8"><input id="nn" placeholder="Notes (name, size…)"><button class="p" onclick="addReq()">Add</button></div>
+ <datalist id="il">${[...new Set(S.reqs.map(r=>r.item))].map(i=>`<option value="${esc(i)}">`).join('')}</datalist></div>
+ ${fbar(S.reqs,STS,0)}<div class="row"><button class="p" onclick="mkShip()">Prepare shipment from ticked items</button><span class="m">${rs.length} item(s)</span></div>
+ <div class="sc"><table><tr><th><th>Date<th>Branch<th>Item<th>Qty<th>Notes<th>Status<th></tr>${body||'<tr><td colspan="8" class="m">No data</td></tr>'}</table></div>`}
+function vShip(){
+ const q=F.q.toLowerCase(),ls=S.ships.map((s,i)=>[s,i]).filter(([s])=>dm(s)&&(!F.s||s.status==F.s)&&(!F.c||s.carrier==F.c)&&(!q||(s.code+' '+s.carrier+' '+items(s.id).map(r=>r.item+' '+r.note).join(' ')).toLowerCase().includes(q))).sort((a,b)=>b[0].date.localeCompare(a[0].date)||b[1]-a[1]).map(x=>x[0]);
+ let last='',body='';
+ ls.forEach(s=>{const k=gk(s.date);if(k!=last){last=k;body+=`<h3>${k} <span class="m">(${ls.filter(x=>gk(x.date)==k).length})</span></h3>`}
+  body+=`<div class="card"><div class="row"><b>${BR[s.branch][0]}</b><span class="m">${s.date}</span><span class="pill ${s.status}">${s.status}</span><span class="m">${esc(s.carrier)} ${esc(s.code)}</span></div>
+ <ul>${items(s.id).map(r=>`<li>${esc(r.item)} × ${esc(r.qty)}${r.note?` <span class="m">(${esc(r.note)})</span>`:''}</li>`).join('')}</ul>
+ <div class="row"><select onchange="up('${s.id}','status',this.value,1)">${STS.slice(1).map(x=>`<option${x==s.status?' selected':''}>${x}</option>`).join('')}</select>
+ <select onchange="up('${s.id}','carrier',this.value,1)"><option value="">Carrier…</option>${CR.map(c=>`<option${c==s.carrier?' selected':''}>${c}</option>`).join('')}</select>
+ <input placeholder="Tracking code" value="${esc(s.code)}" onchange="up('${s.id}','code',this.value.trim(),1)">
+ <label class="m">Delivered on <input type="date" value="${s.deliv||''}" onchange="up('${s.id}','deliv',this.value)"></label></div>
+ <div class="row"><button class="p" onclick="nota('${s.id}')">Download delivery note (.xlsx)</button><button onclick="unship('${s.id}')">Cancel shipment</button></div></div>`});
+ return fbar(S.ships,STS.slice(1),1)+`<div class="m">${ls.length} shipment(s)</div>`+(body||'<p class="m">No shipments yet. Tick items in Item requests, then click “Prepare shipment”.</p>')}
+function addReq(){const item=$('#ni').value.trim();if(!item)return;const r={id:uid(),date:$('#nd').value||today(),branch:$('#nb').value,item,qty:$('#nq').value.trim()||'1',note:$('#nn').value.trim()};S.reqs.push(r);sync([putR(r)]);render()}
+function tg(id){sel.has(id)?sel.delete(id):sel.add(id)}
+function del(id){if(!confirm('Delete this item?'))return;const r=S.reqs.find(x=>x.id==id);S.reqs=S.reqs.filter(x=>x.id!=id);sel.delete(id);const ops=[{t:'del',sheet:'Requests',id}];const s=r&&S.ships.find(x=>x.id==r.shipId);if(s)ops.push(putS(s));sync(ops);render()}
+function mkShip(){const rs=S.reqs.filter(r=>sel.has(r.id));if(!rs.length)return alert('Tick at least one item first.');if(new Set(rs.map(r=>r.branch)).size>1)return alert('One shipment = one branch.');
+ const id=uid();S.ships.push({id,date:today(),branch:rs[0].branch,status:'Prepared',carrier:'',code:'',deliv:''});rs.forEach(r=>r.shipId=id);sel.clear();const s=S.ships[S.ships.length-1];sync([...rs.map(putR),putS(s)]);go('ship')}
+function up(id,k,v,re){const s=S.ships.find(x=>x.id==id);s[k]=v;if(k=='status'&&v=='Delivered'&&!s.deliv)s.deliv=today();sync([putS(s)]);if(re)render()}
+function unship(id){if(!confirm('Cancel this shipment? Items go back to Requested.'))return;const its=items(id);its.forEach(r=>delete r.shipId);S.ships=S.ships.filter(s=>s.id!=id);sync([...its.map(putR),{t:'del',sheet:'Shipments',id}]);render()}
+function dl(blob,name){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click()}
+function bk(){dl(new Blob([JSON.stringify(S)],{type:'application/json'}),'delivery-backup-'+today()+'.json')}
+function rs(el){const f=el.files[0];if(!f)return;f.text().then(t=>{try{S=JSON.parse(t);sync(allOps());render()}catch(e){alert('Invalid file')}})}
+async function nota(id){
+ const s=S.ships.find(x=>x.id==id),b=BR[s.branch],its=items(id),wb=new ExcelJS.Workbook(),ws=wb.addWorksheet(s.date.replace(/-/g,''));
+ [6,10,10,10,10,18,24].forEach((w,i)=>ws.getColumn(i+1).width=w);
+ const F=(z,b)=>({name:'Microsoft JhengHei',size:z,bold:!!b}),put=(r,v,z,bd,al)=>{ws.mergeCells(r,1,r,7);const c=ws.getCell(r,1);c.value=v;c.font=F(z,bd);c.alignment={horizontal:al||'center',vertical:'middle'}};
+ const [y,m,d]=s.date.split('-');
+ put(1,'XMART 艾克市股份有限公司',18,1);put(2,'地址 : 台北市信義區忠孝東路五段508號9樓之2',12);put(3,'電話 : 02- 2727-5880 / 5881',12);put(5,'出貨單',18,1);
+ put(8,`${y}年 ${+m}月 ${+d}日`,12,1);put(9,'店名：'+b[0],12,0,'left');put(10,'地址： '+b[1],12,0,'left');
+ const hd=(r,c1,c2,v)=>{if(c2>c1)ws.mergeCells(r,c1,r,c2);const c=ws.getCell(r,c1);c.value=v;c.font=F(12,1);c.alignment={horizontal:'center',vertical:'middle'}};
+ hd(12,1,5,'商品名稱 (Product Name)');hd(12,6,6,'數量 (Quantity)');hd(12,7,7,'備註 (Notes)');
+ let r=13;
+ its.forEach(i=>{ws.mergeCells(r,1,r,5);const a=ws.getCell(r,1);a.value=i.item;a.font=F(12);const q=ws.getCell(r,6),n=Number(i.qty);q.value=i.qty!==''&&!isNaN(n)?n:i.qty;q.font=F(12);q.alignment={horizontal:'center'};const t=ws.getCell(r,7);t.value=i.note||null;t.font=F(12);t.alignment={wrapText:true};r++});
+ const e=r+5;ws.mergeCells(r,1,e,1);const a=ws.getCell(r,1);a.value='收\n件\n人\n簽\n章';a.font=F(12);a.alignment={horizontal:'center',vertical:'middle',wrapText:true};
+ const bx=(r1,c1,r2,c2,v)=>{ws.mergeCells(r1,c1,r2,c2);const c=ws.getCell(r1,c1);c.value=v;c.font=F(12);c.alignment={vertical:'top',wrapText:true}};
+ bx(r,2,e,4,'簽名 (Signature): ');bx(r,5,r+1,7,"收件人姓名 (Recipient's Name):");bx(r+2,5,r+3,7,'出貨日期 (Shipment Date): '+s.date.replace(/-/g,'/'));bx(r+4,5,e,7,'收款日期 (Date of Receipt): ');
+ const th={style:'thin'};for(let i=12;i<=e;i++)for(let j=1;j<=7;j++)ws.getCell(i,j).border={top:th,left:th,bottom:th,right:th};
+ ws.pageSetup={paperSize:9,fitToPage:true,fitToWidth:1,fitToHeight:0};
+ dl(new Blob([await wb.xlsx.writeBuffer()],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),`Delivery ${b[0].split(' ')[0]} - ${s.date}.xlsx`)}
+render();pull();setInterval(()=>pull(1),60000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)pull(1)});
+</script></body></html>
